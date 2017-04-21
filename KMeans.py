@@ -38,39 +38,7 @@ def Kmeans(k, data):
 
         curr, old = old, curr
         i += 1
-    print i
-    return cent_assigns
-    """
-    if data.shape[1] == 2:
-        for i in range(k):
-            c = data[np.where(cent_assigns == float(i))[0], :]
-
-            xs = np.squeeze(np.asarray(c[:,0]))
-            ys = np.squeeze(np.asarray(c[:,1]))
-            plt.plot(xs, ys, 'o')
-        plt.show()
-
-    if data.shape[1] == 3:
-        from mpl_toolkits.mplot3d import Axes3D
-        fig = plt.figure()
-	ax = fig.add_subplot(111, projection='3d')
-	colors = get_color()
-        #ax = fig.add_subplot(221, projection='3d')
-        #ax1 = fig.add_subplot(222, projection='3d')
-        #ax2 = fig.add_subplot(223, projection='3d')
-        for i in range(k):
-            c = data[np.where(cent_assigns == float(i))[0], :]
-            col = next(colors)
-
-            xs = np.squeeze(np.asarray(c[:,0]))
-            ys = np.squeeze(np.asarray(c[:,1]))
-            zs = np.squeeze(np.asarray(c[:,2]))
-            
-            ax.scatter(xs, ys, zs, c=col)
-            #ax1.scatter(kv[i, 0], kv[i, 1], kv[i, 2], marker='^')
-            #ax2.scatter(initkv[i, 0], initkv[i, 1], initkv[i, 2], marker='^')
-        plt.show()
-    """
+    return (cent_assigns, i)
 
 def generate(numpoints, ctr, std):
     centers = np.random.uniform(-ctr, ctr, size=2)
@@ -100,13 +68,12 @@ for i in range(4):
     ys = np.concatenate((ys, ys1))
 
 d = np.matrix([xs, ys]).transpose()
-"""
 
 xs = np.array([])
 ys = np.array([])
 zs = np.array([])
-for i in range(7):
-    xs1, ys1, zs1 = generate3(100, (i+1)*20, 5)
+for i in range(10):
+    xs1, ys1, zs1 = generate3(5000, (i+1)*20, 5)
     xs = np.concatenate((xs, xs1))
     ys = np.concatenate((ys, ys1))
     zs = np.concatenate((zs, zs1))
@@ -114,9 +81,9 @@ for i in range(7):
 d = np.matrix([xs, ys, zs]).transpose()
 
 start = time.time()
-cent_assigns = Kmeans(7, d)
+cent_assigns = Kmeans(10, d)
 print(time.time() - start)
-
+exit(0)
 from mpl_toolkits.mplot3d import Axes3D
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
@@ -131,4 +98,4 @@ for i in range(7):
     
     ax.scatter(xs, ys, zs, c=col)
 plt.show()
-
+"""

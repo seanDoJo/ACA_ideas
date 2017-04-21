@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import math
 import time
 import random
+from KMeans import Kmeans
 
 KV = 12
 UPDATE_THREADS = 32
@@ -25,18 +26,6 @@ def generate(numpoints, ctr, std):
     zs = np.random.normal(centers[2], stdevs[2], (1, numpoints))
 
     return (xs[0], ys[0], zs[0])
-
-def generate3(numpoints, ctr, std):
-    centers = np.random.uniform(0, ctr, size=3)
-    stdevs = np.random.uniform(1, std, size=3)
-    xs = np.random.normal(centers[0], stdevs[0], (1, numpoints))
-    ys = np.random.normal(centers[1], stdevs[1], (1, numpoints))
-    zs = np.random.normal(centers[2], stdevs[2], (1, numpoints))
-
-    d = np.matrix([xs[0], ys[0], zs[0]]).T
-    flattened = np.squeeze(np.asarray(d.reshape((1, 3*numpoints))))
-
-    return flattened
 
 def genCentroids3(k, mxs, mys, mzs, std):
     stdevs = np.random.uniform(0, std, size=3)
@@ -66,14 +55,19 @@ def genCentroids3(k, mxs, mys, mzs, std):
 @cuda.autojit
 def closest3(data, assign, centroids, N, k):
     i = cuda.threadIdx.x + cuda.blockDim.x*cuda.blockIdx.x
+    sid = cuda.threadIdx.x
+    s_centroids = cuda.shared.array(shape=0, dtype=float64)
+    if sid < k*4:
+        s_centroids[sid] = centroids[sid]
+
     if i >= N:
         return
     mDist = -1.0
     ind = -1
     for t in range(k):
-        shiftx = data[i*3] - centroids[t*4]
-        shifty = data[i*3+1] - centroids[t*4+1]
-        shiftz = data[i*3+2] - centroids[t*4+2]
+        shiftx = data[i*3] - s_centroids[t*4]
+        shifty = data[i*3+1] - s_centroids[t*4+1]
+        shiftz = data[i*3+2] - s_centroids[t*4+2]
         dist = shiftx*shiftx + shifty*shifty + shiftz*shiftz
         if ind == -1 or dist < mDist:
             mDist = dist
@@ -86,11 +80,8 @@ def update3(data, assign, centroids, N, k):
     sidx = cuda.threadIdx.x
     nt = cuda.blockDim.x * cuda.gridDim.x
 
-    if index < k:
-        centroids[index*4] = 0.
-        centroids[index*4+1] = 0.
-        centroids[index*4+2] = 0.
-	centroids[index*4+3] = 0.
+    if index < k*4:
+        centroids[index] = 0.
 
     for i in range(index, N, nt):
         x = data[i*3]
@@ -109,6 +100,7 @@ def update3(data, assign, centroids, N, k):
     		centroids[index*4 + 1] /= centroids[index*4 + 3]
 		centroids[index*4 + 2] /= centroids[index*4 + 3]
 	else:
+		
                 n = 3251.
                 n = (n*n / 100) % 10000
 		centroids[index*4] = n % (101)
@@ -116,8 +108,13 @@ def update3(data, assign, centroids, N, k):
 		centroids[index*4 + 1] = n % (101)
 		n = (n*n / 100) % 10000
 		centroids[index*4 + 2] = n % (101)
+		"""
+		centroids[index*4] = 10.
+		centroids[index*4+1] = 10.
+		centroids[index*4+2] = 10.
+                """
 
-def PKMeans(dta, k=8):	
+def PKMeans(dta, k=8, iters=300):	
 
 	N = dta.shape[0]
 
@@ -138,28 +135,32 @@ def PKMeans(dta, k=8):
 
 	dh = np.squeeze(np.asarray(dta.reshape((1, dta.shape[0]*dta.shape[1]))))
 	ch = genCentroids3(k, mxs, mys, mzs, 10)
-	smsize = UPDATE_THREADS*KV*ch.dtype.itemsize
+	smsize = k*4*ch.dtype.itemsize
 	ah = np.zeros(N, dtype=np.int32)
 
 	data = dh.reshape((N, 3))
 
-	dd = cuda.to_device(dh)
-	cd = cuda.to_device(ch)
-	ad = cuda.to_device(ah)
+	stream = cuda.stream()
 
-	for i in range(300):
-		closest3[bpg, tpb](dd, ad, cd, N, k)
-		update3[UPDATE_BLOCKS, UPDATE_THREADS](dd, ad, cd, N, k)
-	closest3[bpg, tpb](dd, ad, cd, N, k)
-	ad.copy_to_host(ah)
+	dd = cuda.to_device(dh, stream=stream)
+	cd = cuda.to_device(ch, stream=stream)
+	ad = cuda.to_device(ah, stream=stream)
+	
+	for i in range(iters):
+		closest3[bpg, tpb, stream, smsize](dd, ad, cd, N, k)
+		update3[UPDATE_BLOCKS, UPDATE_THREADS, stream](dd, ad, cd, N, k)
+	closest3[bpg, tpb, stream, smsize](dd, ad, cd, N, k)
+
+	ad.copy_to_host(ah, stream=stream)
         return ah
 	
+KK = 7
 
 xs = np.array([])
 ys = np.array([])
 zs = np.array([])
-for i in range(3):
-	xs1, ys1, zs1 = generate(5000, (i+1)*20, 5)
+for i in range(KK):
+	xs1, ys1, zs1 = generate(4000, (i+1)*50, 5)
 	xs = np.concatenate((xs, xs1))
 	ys = np.concatenate((ys, ys1))
 	zs = np.concatenate((zs, zs1))
@@ -167,21 +168,36 @@ for i in range(3):
 d = np.matrix([xs, ys, zs]).transpose()
 
 start = time.time()
-ah = PKMeans(d, k=3)
+ahh, it = Kmeans(KK, d)
 print(time.time() - start)
+
+start = time.time()
+ah = PKMeans(d, k=KK, iters=it)
+print(time.time() - start)
+
 
 fig = plt.figure()
 ax = fig.add_subplot(121, projection='3d')
 ax1 = fig.add_subplot(122, projection='3d')
-ax1.scatter(xs, ys, zs)
 colors = get_color()
-for i in range(3):
+
+for i in range(KK):
     c = d[np.where(ah == float(i))[0], :]
     col = next(colors)
 
-    xs = np.squeeze(np.asarray(c[:,0]))
-    ys = np.squeeze(np.asarray(c[:,1]))
-    zs = np.squeeze(np.asarray(c[:,2]))
+    xss = np.squeeze(np.asarray(c[:,0]))
+    yss = np.squeeze(np.asarray(c[:,1]))
+    zss = np.squeeze(np.asarray(c[:,2]))
 
-    ax.scatter(xs, ys, zs, c=col)
+    ax.scatter(xss, yss, zss, c=col)
+
+for i in range(KK):
+    c = d[np.where(ahh == float(i))[0], :]
+    col = next(colors)
+
+    xss = np.squeeze(np.asarray(c[:,0]))
+    yss = np.squeeze(np.asarray(c[:,1]))
+    zss = np.squeeze(np.asarray(c[:,2]))
+
+    ax1.scatter(xss, yss, zss, c=col)
 plt.show()
